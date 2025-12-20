@@ -4,7 +4,7 @@
 
 An immersive virtual office - Winner of [2021 Monte Jade Innovation Competition](https://www.montejadese.org/innovation-competition)
 
-- Come try it out - [Official Website](https://sky-office.co/)
+- Come try it out - [Official Website](https://skyoffice.netlify.app)
 - Why we built this - [Concept Video](https://www.youtube.com/watch?v=BpDqGTPh8pc)
 - 🙌 Get latest updates? Follow our [Twitter](https://twitter.com/SkyOfficeApp).
 - 💕 Love this project? Consider [buy me a coffee](https://www.buymeacoffee.com/skyoffice).
