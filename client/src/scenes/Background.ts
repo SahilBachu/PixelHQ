@@ -1,5 +1,5 @@
 import Phaser from 'phaser'
-import { BackgroundMode } from '../../../types/BackgroundMode'
+import { BackgroundMode } from '../types/BackgroundMode'
 
 export default class Background extends Phaser.Scene {
   private cloud!: Phaser.Physics.Arcade.Group

@@ -1,6 +1,5 @@
 import Phaser from 'phaser'
 
-// import { debugDraw } from '../utils/debug'
 import { createCharacterAnims } from '../anims/CharacterAnims'
 
 import Item from '../items/Item'
@@ -9,31 +8,37 @@ import Computer from '../items/Computer'
 import Whiteboard from '../items/Whiteboard'
 import VendingMachine from '../items/VendingMachine'
 import '../characters/MyPlayer'
-import '../characters/OtherPlayer'
 import MyPlayer from '../characters/MyPlayer'
-import OtherPlayer from '../characters/OtherPlayer'
 import PlayerSelector from '../characters/PlayerSelector'
-import Network from '../services/Network'
-import { IPlayer } from '../../../types/IOfficeState'
-import { PlayerBehavior } from '../../../types/PlayerBehavior'
-import { ItemType } from '../../../types/Items'
+import { PlayerBehavior } from '../types/PlayerBehavior'
+import { NavKeys, Keyboard } from '../types/KeyboardState'
 
 import store from '../stores'
-import { setFocused, setShowChat } from '../stores/ChatStore'
-import { NavKeys, Keyboard } from '../../../types/KeyboardState'
+import { finishPlacement, cancelPlacement, selectAgent, AVATAR_OPTIONS } from '../stores/AgentStore'
+import type { Agent } from '../stores/AgentStore'
+
+const AGENT_SPRITE_SCALE = 1
 
 export default class Game extends Phaser.Scene {
-  network!: Network
   private cursors!: NavKeys
   private keyE!: Phaser.Input.Keyboard.Key
   private keyR!: Phaser.Input.Keyboard.Key
   private map!: Phaser.Tilemaps.Tilemap
   myPlayer!: MyPlayer
   private playerSelector!: Phaser.GameObjects.Zone
-  private otherPlayers!: Phaser.Physics.Arcade.Group
-  private otherPlayerMap = new Map<string, OtherPlayer>()
   computerMap = new Map<string, Computer>()
   private whiteboardMap = new Map<string, Whiteboard>()
+
+  // Agent placement
+  private placementPreview: Phaser.GameObjects.Container | null = null
+  private placementSprite: Phaser.GameObjects.Sprite | null = null
+  private placementCircle: Phaser.GameObjects.Graphics | null = null
+  private isPlacementValid = false
+  private escKey!: Phaser.Input.Keyboard.Key
+
+  // Agent sprites on map
+  private agentSprites = new Map<string, Phaser.GameObjects.Container>()
+  private lastAgentCount = 0
 
   constructor() {
     super('game')
@@ -45,17 +50,10 @@ export default class Game extends Phaser.Scene {
       ...(this.input.keyboard.addKeys('W,S,A,D') as Keyboard),
     }
 
-    // maybe we can have a dedicated method for adding keys if more keys are needed in the future
     this.keyE = this.input.keyboard.addKey('E')
     this.keyR = this.input.keyboard.addKey('R')
+    this.escKey = this.input.keyboard.addKey('ESC')
     this.input.keyboard.disableGlobalCapture()
-    this.input.keyboard.on('keydown-ENTER', (event) => {
-      store.dispatch(setShowChat(true))
-      store.dispatch(setFocused(true))
-    })
-    this.input.keyboard.on('keydown-ESC', (event) => {
-      store.dispatch(setShowChat(false))
-    })
   }
 
   disableKeys() {
@@ -66,13 +64,7 @@ export default class Game extends Phaser.Scene {
     this.input.keyboard.enabled = true
   }
 
-  create(data: { network: Network }) {
-    if (!data.network) {
-      throw new Error('server instance missing')
-    } else {
-      this.network = data.network
-    }
-
+  create() {
     createCharacterAnims(this.anims)
 
     this.map = this.make.tilemap({ key: 'tilemap' })
@@ -81,9 +73,7 @@ export default class Game extends Phaser.Scene {
     const groundLayer = this.map.createLayer('Ground', FloorAndGround)
     groundLayer.setCollisionByProperty({ collides: true })
 
-    // debugDraw(groundLayer, this)
-
-    this.myPlayer = this.add.myPlayer(705, 500, 'adam', this.network.mySessionId)
+    this.myPlayer = this.add.myPlayer(705, 500, 'adam', 'local-player')
     this.playerSelector = new PlayerSelector(this, 0, 0, 16, 16)
 
     // import chair objects from Tiled map to Phaser
@@ -91,7 +81,6 @@ export default class Game extends Phaser.Scene {
     const chairLayer = this.map.getObjectLayer('Chair')
     chairLayer.objects.forEach((chairObj) => {
       const item = this.addObjectFromTiled(chairs, chairObj, 'chairs', 'chair') as Chair
-      // custom properties[0] is the object direction specified in Tiled
       item.itemDirection = chairObj.properties[0].value
     })
 
@@ -136,8 +125,6 @@ export default class Game extends Phaser.Scene {
     this.addGroupFromTiled('GenericObjectsOnCollide', 'generic', 'Generic', true)
     this.addGroupFromTiled('Basement', 'basement', 'Basement', true)
 
-    this.otherPlayers = this.physics.add.group({ classType: OtherPlayer })
-
     this.cameras.main.zoom = 1.5
     this.cameras.main.startFollow(this.myPlayer, true)
 
@@ -152,38 +139,24 @@ export default class Game extends Phaser.Scene {
       this
     )
 
-    this.physics.add.overlap(
-      this.myPlayer,
-      this.otherPlayers,
-      this.handlePlayersOverlap,
-      undefined,
-      this
-    )
-
-    // register network event listeners
-    this.network.onPlayerJoined(this.handlePlayerJoined, this)
-    this.network.onPlayerLeft(this.handlePlayerLeft, this)
-    this.network.onMyPlayerReady(this.handleMyPlayerReady, this)
-    this.network.onMyPlayerVideoConnected(this.handleMyVideoConnected, this)
-    this.network.onPlayerUpdated(this.handlePlayerUpdated, this)
-    this.network.onItemUserAdded(this.handleItemUserAdded, this)
-    this.network.onItemUserRemoved(this.handleItemUserRemoved, this)
-    this.network.onChatMessageAdded(this.handleChatMessageAdded, this)
+    // Setup placement input handlers
+    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      this.handlePlacementMove(pointer)
+    })
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      this.handlePlacementClick(pointer)
+    })
   }
 
   private handleItemSelectorOverlap(playerSelector, selectionItem) {
     const currentItem = playerSelector.selectedItem as Item
-    // currentItem is undefined if nothing was perviously selected
     if (currentItem) {
-      // if the selection has not changed, do nothing
       if (currentItem === selectionItem || currentItem.depth >= selectionItem.depth) {
         return
       }
-      // if selection changes, clear pervious dialog
       if (this.myPlayer.playerBehavior !== PlayerBehavior.SITTING) currentItem.clearDialogBox()
     }
 
-    // set selected item and set up new dialog
     playerSelector.selectedItem = selectionItem
     selectionItem.onOverlapDialog()
   }
@@ -221,70 +194,211 @@ export default class Game extends Phaser.Scene {
       this.physics.add.collider([this.myPlayer, this.myPlayer.playerContainer], group)
   }
 
-  // function to add new player to the otherPlayer group
-  private handlePlayerJoined(newPlayer: IPlayer, id: string) {
-    const otherPlayer = this.add.otherPlayer(newPlayer.x, newPlayer.y, 'adam', id, newPlayer.name)
-    this.otherPlayers.add(otherPlayer)
-    this.otherPlayerMap.set(id, otherPlayer)
+  /* ─── Placement Mode ─────────────────────────────────── */
+
+  private handlePlacementMove(pointer: Phaser.Input.Pointer) {
+    const state = store.getState().agent.placementMode
+    if (!state.isActive || !state.agentData) return
+
+    const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y)
+
+    if (!this.placementPreview) {
+      this.createPlacementPreview(state.agentData.avatar)
+    }
+
+    this.placementPreview!.setPosition(worldPoint.x, worldPoint.y)
+
+    // Check validity
+    this.isPlacementValid = this.checkPlacementValid(worldPoint.x, worldPoint.y)
+    this.updatePlacementVisual(this.isPlacementValid)
   }
 
-  // function to remove the player who left from the otherPlayer group
-  private handlePlayerLeft(id: string) {
-    if (this.otherPlayerMap.has(id)) {
-      const otherPlayer = this.otherPlayerMap.get(id)
-      if (!otherPlayer) return
-      this.otherPlayers.remove(otherPlayer, true, true)
-      this.otherPlayerMap.delete(id)
+  private handlePlacementClick(pointer: Phaser.Input.Pointer) {
+    const state = store.getState().agent.placementMode
+    if (!state.isActive || !state.agentData) return
+
+    if (!pointer.leftButtonDown()) return
+
+    const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y)
+
+    if (this.checkPlacementValid(worldPoint.x, worldPoint.y)) {
+      store.dispatch(finishPlacement({ x: worldPoint.x, y: worldPoint.y }))
+      this.destroyPlacementPreview()
     }
   }
 
-  private handleMyPlayerReady() {
-    this.myPlayer.readyToConnect = true
+  private createPlacementPreview(avatarKey: string) {
+    this.placementPreview = this.add.container(0, 0).setDepth(10000)
+
+    // Circle indicator
+    this.placementCircle = this.add.graphics()
+    this.placementPreview.add(this.placementCircle)
+
+    // Sprite
+    this.placementSprite = this.add.sprite(0, 0, avatarKey, 0)
+    this.placementSprite.setScale(AGENT_SPRITE_SCALE)
+    this.placementPreview.add(this.placementSprite)
   }
 
-  private handleMyVideoConnected() {
-    this.myPlayer.videoConnected = true
-  }
+  private updatePlacementVisual(isValid: boolean) {
+    if (!this.placementCircle || !this.placementSprite) return
 
-  // function to update target position upon receiving player updates
-  private handlePlayerUpdated(field: string, value: number | string, id: string) {
-    const otherPlayer = this.otherPlayerMap.get(id)
-    otherPlayer?.updateOtherPlayer(field, value)
-  }
+    this.placementCircle.clear()
 
-  private handlePlayersOverlap(myPlayer, otherPlayer) {
-    otherPlayer.makeCall(myPlayer, this.network?.webRTC)
-  }
-
-  private handleItemUserAdded(playerId: string, itemId: string, itemType: ItemType) {
-    if (itemType === ItemType.COMPUTER) {
-      const computer = this.computerMap.get(itemId)
-      computer?.addCurrentUser(playerId)
-    } else if (itemType === ItemType.WHITEBOARD) {
-      const whiteboard = this.whiteboardMap.get(itemId)
-      whiteboard?.addCurrentUser(playerId)
+    if (isValid) {
+      this.placementSprite.setAlpha(1)
+      this.placementSprite.setTint(0xffffff)
+      this.placementCircle.lineStyle(2, 0x4ade80, 0.5)
+      this.placementCircle.strokeCircle(0, 0, 25)
+      this.placementCircle.fillStyle(0x4ade80, 0.08)
+      this.placementCircle.fillCircle(0, 0, 25)
+    } else {
+      this.placementSprite.setAlpha(0.6)
+      this.placementSprite.setTint(0xff4444)
+      this.placementCircle.lineStyle(2, 0xff4444, 0.5)
+      this.placementCircle.strokeCircle(0, 0, 25)
+      this.placementCircle.fillStyle(0xff4444, 0.08)
+      this.placementCircle.fillCircle(0, 0, 25)
     }
   }
 
-  private handleItemUserRemoved(playerId: string, itemId: string, itemType: ItemType) {
-    if (itemType === ItemType.COMPUTER) {
-      const computer = this.computerMap.get(itemId)
-      computer?.removeCurrentUser(playerId)
-    } else if (itemType === ItemType.WHITEBOARD) {
-      const whiteboard = this.whiteboardMap.get(itemId)
-      whiteboard?.removeCurrentUser(playerId)
+  private destroyPlacementPreview() {
+    if (this.placementPreview) {
+      this.placementPreview.destroy()
+      this.placementPreview = null
+      this.placementSprite = null
+      this.placementCircle = null
     }
   }
 
-  private handleChatMessageAdded(playerId: string, content: string) {
-    const otherPlayer = this.otherPlayerMap.get(playerId)
-    otherPlayer?.updateDialogBubble(content)
+  private checkPlacementValid(x: number, y: number): boolean {
+    // Check map bounds
+    const mapWidth = this.map.widthInPixels
+    const mapHeight = this.map.heightInPixels
+    const margin = 32
+    if (x < margin || x > mapWidth - margin || y < margin || y > mapHeight - margin) {
+      return false
+    }
+
+    // Check distance from existing agents
+    const agents = store.getState().agent.agents
+    for (const agent of agents) {
+      const dist = Phaser.Math.Distance.Between(x, y, agent.position.x, agent.position.y)
+      if (dist < 50) return false
+    }
+
+    // Check distance from player
+    if (this.myPlayer) {
+      const dist = Phaser.Math.Distance.Between(x, y, this.myPlayer.x, this.myPlayer.y)
+      if (dist < 40) return false
+    }
+
+    return true
+  }
+
+  /* ─── Agent Sprites ──────────────────────────────────── */
+
+  private syncAgentSprites() {
+    const agents = store.getState().agent.agents
+    const selectedId = store.getState().agent.selectedAgentId
+
+    // Remove sprites for deleted agents
+    for (const [id, container] of this.agentSprites) {
+      if (!agents.find((a) => a.id === id)) {
+        container.destroy()
+        this.agentSprites.delete(id)
+      }
+    }
+
+    // Add or update sprites
+    for (const agent of agents) {
+      if (!this.agentSprites.has(agent.id)) {
+        this.createAgentSprite(agent)
+      }
+
+      const container = this.agentSprites.get(agent.id)
+      if (container) {
+        container.setPosition(agent.position.x, agent.position.y)
+
+        // Selection highlight
+        const highlight = container.getData('highlight') as Phaser.GameObjects.Graphics
+        if (highlight) {
+          highlight.clear()
+          if (selectedId === agent.id) {
+            highlight.lineStyle(2, 0x0d59f2, 0.8)
+            highlight.strokeCircle(0, 0, 20)
+            highlight.fillStyle(0x0d59f2, 0.1)
+            highlight.fillCircle(0, 0, 20)
+          }
+        }
+      }
+    }
+  }
+
+  private createAgentSprite(agent: Agent) {
+    const container = this.add.container(agent.position.x, agent.position.y).setDepth(agent.position.y)
+
+    // Selection highlight circle (behind sprite)
+    const highlight = this.add.graphics()
+    container.add(highlight)
+    container.setData('highlight', highlight)
+
+    // Character sprite
+    const sprite = this.add.sprite(0, 0, agent.avatar, 0)
+    sprite.setScale(AGENT_SPRITE_SCALE)
+    sprite.play(`${agent.avatar}_idle_down`, true)
+    container.add(sprite)
+
+    // Name label
+    const avatarColor = AVATAR_OPTIONS.find((o) => o.key === agent.avatar)?.color ?? '#ffffff'
+    const nameTag = this.add.text(0, -30, agent.name, {
+      fontSize: '10px',
+      fontFamily: 'Arial',
+      color: avatarColor,
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5)
+    container.add(nameTag)
+    container.setData('nameTag', nameTag)
+
+    // Make interactive
+    const hitArea = new Phaser.Geom.Circle(0, 0, 20)
+    container.setInteractive(hitArea, Phaser.Geom.Circle.Contains)
+
+    container.on('pointerdown', () => {
+      store.dispatch(selectAgent(agent.id))
+    })
+
+    container.on('pointerover', () => {
+      sprite.setScale(AGENT_SPRITE_SCALE * 1.1)
+    })
+
+    container.on('pointerout', () => {
+      sprite.setScale(AGENT_SPRITE_SCALE)
+    })
+
+    this.agentSprites.set(agent.id, container)
   }
 
   update(t: number, dt: number) {
-    if (this.myPlayer && this.network) {
+    if (this.myPlayer) {
       this.playerSelector.update(this.myPlayer, this.cursors)
-      this.myPlayer.update(this.playerSelector, this.cursors, this.keyE, this.keyR, this.network)
+      this.myPlayer.update(this.playerSelector, this.cursors, this.keyE, this.keyR)
     }
+
+    // Check ESC for placement cancel
+    const placementState = store.getState().agent.placementMode
+    if (placementState.isActive && this.escKey && Phaser.Input.Keyboard.JustDown(this.escKey)) {
+      store.dispatch(cancelPlacement())
+      this.destroyPlacementPreview()
+    }
+
+    // Cancel placement if state changed externally
+    if (!placementState.isActive && this.placementPreview) {
+      this.destroyPlacementPreview()
+    }
+
+    // Sync agent sprites
+    this.syncAgentSprites()
   }
 }

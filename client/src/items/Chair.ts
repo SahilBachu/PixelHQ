@@ -1,4 +1,4 @@
-import { ItemType } from '../../../types/Items'
+import { ItemType } from '../types/Items'
 import Item from './Item'
 
 export default class Chair extends Item {

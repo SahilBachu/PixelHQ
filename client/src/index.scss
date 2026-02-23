@@ -1,11 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 body {
   margin: 0;
   padding: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu',
-    'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   box-sizing: border-box;
+  background: #101622;
 }
 
 *,
@@ -14,65 +18,68 @@ body {
   box-sizing: inherit;
 }
 
+/* Phaser canvas: fullscreen background layer */
 #phaser-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+
   canvas {
     display: block;
   }
 }
 
-.video-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, 160px);
-  grid-gap: 5px;
-  grid-auto-rows: 160px;
-  position: absolute;
-  top: 35px;
-  right: 10px;
-  max-height: calc(100% - 100px);
-  overflow-y: auto;
+/* React UI: fullscreen overlay, always on top of Phaser canvas */
+#root {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  pointer-events: none; /* pass-through so Phaser receives clicks in game area */
 }
 
-.video-grid video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 5px;
-  border: 1px groove rgb(229, 251, 255);
+/* LoginDialog and other overlays use pointer-events-auto; layout uses pointer-events-none on container */
+
+.glass-panel {
+  background: rgba(22, 27, 46, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.button-grid {
-  width: 160px;
-  display: flex;
-  justify-content: space-evenly;
-  position: absolute;
-  top: 5px;
-  right: 10px;
+.glass-input {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 * {
   &:hover {
     &::-webkit-scrollbar-thumb {
-      background: #eee;
+      background: rgba(255, 255, 255, 0.3);
     }
   }
 
   &::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
   }
 
   &::-webkit-scrollbar-track {
-    background: rgba(#333, 0.2);
-    border-radius: 3px;
+    background: transparent;
   }
 
   &::-webkit-scrollbar-corner {
-    background: rgba(#333, 0.2);
+    background: transparent;
   }
 
   &::-webkit-scrollbar-thumb {
     transition: background 0.1s;
-    background: rgba(#eee, 0.8);
+    background: rgba(255, 255, 255, 0.1);
     border-radius: 3px;
   }
 }

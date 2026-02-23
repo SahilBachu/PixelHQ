@@ -1,6 +1,5 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
-import { sanitizeId } from '../util'
-import { BackgroundMode } from '../../../types/BackgroundMode'
+import { BackgroundMode } from '../types/BackgroundMode'
 
 import phaserGame from '../PhaserGame'
 import Bootstrap from '../scenes/Bootstrap'
@@ -14,10 +13,8 @@ export const userSlice = createSlice({
   name: 'user',
   initialState: {
     backgroundMode: getInitialBackgroundMode(),
-    sessionId: '',
-    videoConnected: false,
+    sessionId: 'local-player',
     loggedIn: false,
-    playerNameMap: new Map<string, string>(),
     showJoystick: window.innerWidth < 650,
   },
   reducers: {
@@ -32,17 +29,8 @@ export const userSlice = createSlice({
     setSessionId: (state, action: PayloadAction<string>) => {
       state.sessionId = action.payload
     },
-    setVideoConnected: (state, action: PayloadAction<boolean>) => {
-      state.videoConnected = action.payload
-    },
     setLoggedIn: (state, action: PayloadAction<boolean>) => {
       state.loggedIn = action.payload
-    },
-    setPlayerNameMap: (state, action: PayloadAction<{ id: string; name: string }>) => {
-      state.playerNameMap.set(sanitizeId(action.payload.id), action.payload.name)
-    },
-    removePlayerNameMap: (state, action: PayloadAction<string>) => {
-      state.playerNameMap.delete(sanitizeId(action.payload))
     },
     setShowJoystick: (state, action: PayloadAction<boolean>) => {
       state.showJoystick = action.payload
@@ -53,10 +41,7 @@ export const userSlice = createSlice({
 export const {
   toggleBackgroundMode,
   setSessionId,
-  setVideoConnected,
   setLoggedIn,
-  setPlayerNameMap,
-  removePlayerNameMap,
   setShowJoystick,
 } = userSlice.actions
 

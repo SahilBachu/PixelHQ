@@ -1,4 +1,4 @@
-import { ItemType } from '../../../types/Items'
+import { ItemType } from '../types/Items'
 import Item from './Item'
 
 export default class VendingMachine extends Item {
@@ -9,6 +9,6 @@ export default class VendingMachine extends Item {
   }
 
   onOverlapDialog() {
-    this.setDialogBox('Press R to buy a coffee :)')
+    // No dialog - R key interaction removed
   }
 }
